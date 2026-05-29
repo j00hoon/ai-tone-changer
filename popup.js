@@ -70,7 +70,7 @@ inputText.addEventListener("keydown", (e) => {
 });
 
 // --- Settings: load saved values ---
-api.storage.sync.get(["apiKey", "provider"]).then(({ apiKey = "", provider = "openai" }) => {
+api.storage.local.get(["apiKey", "provider"]).then(({ apiKey = "", provider = "openai" }) => {
   apiKeyInput.value = apiKey;
   providerSelect.value = provider;
 });
@@ -92,7 +92,7 @@ btnSave.addEventListener("click", () => {
     return;
   }
 
-  api.storage.sync.set({ apiKey, provider }).then(() => {
+  api.storage.local.set({ apiKey, provider }).then(() => {
     flashSaveStatus("Saved!", true);
   });
 });

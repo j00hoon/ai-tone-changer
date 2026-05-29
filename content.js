@@ -122,6 +122,34 @@ function createFloatingMenu() {
     btn.addEventListener("click", () => handleToneClick(btn.dataset.tone));
   });
 
+  // Drag by header
+  const header = menu.querySelector(".atc-header");
+  header.style.cursor = "grab";
+  let dragging = false, ox = 0, oy = 0;
+
+  header.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".atc-close")) return;
+    dragging = true;
+    ox = e.clientX - menu.getBoundingClientRect().left;
+    oy = e.clientY - menu.getBoundingClientRect().top;
+    header.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    let left = e.clientX - ox;
+    let top  = e.clientY - oy;
+    left = Math.max(0, Math.min(left, window.innerWidth  - menu.offsetWidth));
+    top  = Math.max(0, Math.min(top,  window.innerHeight - menu.offsetHeight));
+    menu.style.left = `${left}px`;
+    menu.style.top  = `${top}px`;
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (dragging) { dragging = false; header.style.cursor = "grab"; }
+  });
+
   return menu;
 }
 

@@ -90,7 +90,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   const { text, tone } = message;
 
-  api.storage.sync.get(["apiKey", "provider"]).then(({ apiKey, provider = "openai" }) => {
+  api.storage.local.get(["apiKey", "provider"]).then(({ apiKey, provider = "openai" }) => {
     if (!apiKey) {
       sendResponse({ error: "API key not set. Please configure it in the extension popup." });
       return;
