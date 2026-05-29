@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Tone Changer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <div class="header-icon">✍️</div>
+    <div>
+      <div class="header-title">AI Tone Changer</div>
+      <div class="header-subtitle">Rewrite text in seconds</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="transform">Transform</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </div>
+
+  <!-- Transform Tab -->
+  <div class="tab-panel active" id="tab-transform">
+    <div class="tone-row">
+      <button class="tone-btn selected" data-tone="professional">💼 Professional</button>
+      <button class="tone-btn" data-tone="casual">💬 Casual</button>
+    </div>
+
+    <textarea id="input-text" placeholder="Paste or type your text here…"></textarea>
+
+    <div class="action-row">
+      <button class="btn-primary" id="btn-transform">Transform</button>
+      <span class="shortcut-hint">or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd></span>
+    </div>
+
+    <div class="result-box" id="result-box"></div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div class="tab-panel" id="tab-settings">
+    <div class="form-group">
+      <label>AI Provider</label>
+      <select id="provider-select">
+        <option value="openai">OpenAI (GPT-4o mini)</option>
+        <option value="anthropic">Anthropic (Claude Haiku)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>API Key</label>
+      <div class="input-row">
+        <input type="password" id="api-key-input" placeholder="sk-… or sk-ant-…" />
+        <button class="btn-secondary" id="btn-toggle-key">Show</button>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="btn-save" style="width:100%;">Save Settings</button>
+    <div class="save-status" id="save-status"></div>
+
+    <div class="form-group" style="margin-top:14px;">
+      <div class="info-box">
+        <strong>Keyboard shortcut:</strong> Focus any text field on the page, then press
+        <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Y</kbd> to open the tone menu inline.
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
