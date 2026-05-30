@@ -4,6 +4,9 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 let activeElement = null;
 let floatingMenu = null;
+let selectionBtn = null;
+let savedRange = null;    // range saved when 🪄 is clicked, used to restore partial selection
+let savedInputSel = null; // { start, end } for input/textarea
 
 // --- Element detection helpers ---
 
@@ -173,16 +176,113 @@ function positionMenu(menu) {
   menu.style.left = `${left}px`;
 }
 
-function showMenu() {
+function showMenu(anchorX, anchorY) {
   if (floatingMenu) return;
   floatingMenu = createFloatingMenu();
-  positionMenu(floatingMenu);
+  if (anchorX !== undefined) {
+    const MENU_W = 214;
+    const left = Math.min(anchorX, window.innerWidth - MENU_W - 6);
+    floatingMenu.style.left = `${Math.max(6, left)}px`;
+    floatingMenu.style.top  = `${Math.max(6, anchorY)}px`;
+  } else {
+    positionMenu(floatingMenu);
+  }
 }
 
 function removeMenu() {
-  if (floatingMenu) {
-    floatingMenu.remove();
-    floatingMenu = null;
+  if (floatingMenu) { floatingMenu.remove(); floatingMenu = null; }
+}
+
+// --- Selection button (🪄) ---
+
+function createSelectionBtn() {
+  removeSelectionBtn();
+
+  if (!document.getElementById("atc-sel-style")) {
+    const s = document.createElement("style");
+    s.id = "atc-sel-style";
+    s.textContent = `
+      #atc-sel-btn {
+        position: fixed;
+        z-index: 2147483646;
+        width: 34px; height: 34px;
+        background: #4f46e5;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 17px;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(79,70,229,.45);
+        transition: transform .15s, box-shadow .15s;
+        user-select: none;
+      }
+      #atc-sel-btn:hover { transform: scale(1.12); box-shadow: 0 4px 14px rgba(79,70,229,.6); }
+    `;
+    document.head.appendChild(s);
+  }
+
+  const btn = document.createElement("div");
+  btn.id = "atc-sel-btn";
+  btn.textContent = "🪄";
+  btn.title = "AI Tone Changer";
+  document.body.appendChild(btn);
+
+  // preventDefault on mousedown preserves the text selection
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const rect = btn.getBoundingClientRect();
+
+    // Save selection BEFORE removing button and showing menu
+    const el = resolveEditable();
+    if (el) {
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+        savedInputSel = { start: el.selectionStart, end: el.selectionEnd };
+      } else if (el.isContentEditable) {
+        const sel = window.getSelection();
+        if (sel?.rangeCount > 0 && sel.toString().trim()) {
+          savedRange = sel.getRangeAt(0).cloneRange();
+        }
+      }
+    }
+
+    removeSelectionBtn();
+    activeElement = el || resolveEditable();
+    showMenu(rect.left - 90, rect.bottom + 8);
+  });
+
+  selectionBtn = btn;
+  return btn;
+}
+
+function removeSelectionBtn() {
+  if (selectionBtn) { selectionBtn.remove(); selectionBtn = null; }
+}
+
+function positionSelectionBtn() {
+  if (!selectionBtn) return;
+  const btn = selectionBtn;
+  const GAP = 8;
+
+  // Contenteditable: position above the actual text selection
+  const sel = window.getSelection();
+  if (sel?.rangeCount > 0 && sel.toString().trim()) {
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (rect.width || rect.height) {
+      let top  = rect.top - 34 - GAP;
+      let left = rect.left + rect.width / 2 - 17;
+      if (top < 0) top = rect.bottom + GAP;
+      btn.style.top  = `${Math.max(6, top)}px`;
+      btn.style.left = `${Math.max(6, Math.min(left, window.innerWidth - 40))}px`;
+      return;
+    }
+  }
+
+  // input / textarea fallback: position above the element itself
+  const el = activeElement;
+  if (el) {
+    const rect = el.getBoundingClientRect();
+    btn.style.top  = `${Math.max(6, rect.top - 34 - GAP)}px`;
+    btn.style.left = `${Math.max(6, Math.min(rect.left + rect.width / 2 - 17, window.innerWidth - 40))}px`;
   }
 }
 
@@ -203,45 +303,41 @@ function getTextFromElement(el) {
   return "";
 }
 
-function replaceTextInElement(el, original, replacement) {
+function replaceTextInElement(el, original, replacement, isPartial = false) {
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    if (start !== end) {
-      const before = el.value.substring(0, start);
-      const after = el.value.substring(end);
-      el.value = before + replacement + after;
-      el.selectionStart = start;
-      el.selectionEnd = start + replacement.length;
-    } else {
-      el.value = replacement;
-      el.selectionStart = 0;
-      el.selectionEnd = replacement.length;
-    }
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    const start = isPartial && savedInputSel ? savedInputSel.start : 0;
+    const end   = isPartial && savedInputSel ? savedInputSel.end   : el.value.length;
+    el.value = el.value.substring(0, start) + replacement + el.value.substring(end);
+    el.selectionStart = start;
+    el.selectionEnd   = start + replacement.length;
+    el.dispatchEvent(new Event("input",  { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return;
   }
+
   if (el.isContentEditable) {
     el.focus();
-    document.execCommand("selectAll", false, null);
 
-    // Wrap in <p> to match the DOM structure LinkedIn/Slack expect for non-empty state.
-    // insertText produces a bare text node; insertHTML produces <p>text</p> which
-    // editors use to distinguish empty (<p><br></p>) from non-empty state.
-    const safe = replacement
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\n/g, "</p><p>");
-    document.execCommand("insertHTML", false, `<p>${safe}</p>`);
+    if (isPartial && savedRange) {
+      // Restore saved selection → replace only that portion
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+      document.execCommand("insertText", false, replacement);
+    } else {
+      // No selection → replace entire content
+      document.execCommand("selectAll", false, null);
+      const safe = replacement
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "</p><p>");
+      document.execCommand("insertHTML", false, `<p>${safe}</p>`);
+    }
 
-    // Defer selection collapse until after MutationObserver / React callbacks run,
-    // so the editor doesn't re-select everything before we collapse.
     requestAnimationFrame(() => {
       el.focus();
-      const sel = window.getSelection();
-      if (sel?.rangeCount) sel.collapseToEnd();
+      window.getSelection()?.collapseToEnd();
     });
   }
 }
@@ -251,9 +347,15 @@ function replaceTextInElement(el, original, replacement) {
 async function handleToneClick(tone) {
   if (!activeElement) return;
 
-  const text = getTextFromElement(activeElement).trim();
+  // Use saved selection text (from 🪄 click) if available, otherwise full text
+  const isPartial = !!(savedRange || savedInputSel);
+  const text = isPartial
+    ? getSavedSelectionText(activeElement)
+    : getTextFromElement(activeElement).trim();
+
   if (!text) {
     showStatus("error", "No text found in the input field.");
+    savedRange = null; savedInputSel = null;
     return;
   }
 
@@ -265,7 +367,7 @@ async function handleToneClick(tone) {
     if (response.error) {
       showStatus("error", response.error);
     } else {
-      replaceTextInElement(activeElement, text, response.result);
+      replaceTextInElement(activeElement, text, response.result, isPartial);
       showStatus("success", "Done!");
       setTimeout(removeMenu, 1200);
     }
@@ -273,7 +375,18 @@ async function handleToneClick(tone) {
     showStatus("error", "Extension error. Please try again.");
   } finally {
     setButtonsDisabled(false);
+    savedRange = null; savedInputSel = null;
   }
+}
+
+function getSavedSelectionText(el) {
+  if (savedInputSel && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+    return el.value.substring(savedInputSel.start, savedInputSel.end).trim();
+  }
+  if (savedRange) {
+    return savedRange.toString().trim();
+  }
+  return getTextFromElement(el).trim();
 }
 
 function showStatus(type, msg) {
@@ -309,11 +422,35 @@ window.addEventListener("keydown", (e) => {
   }
 }, { capture: true });
 
+// Show/hide 🪄 button on any selection change (mouse drag OR keyboard Shift+arrows)
+let selChangeTimer = null;
+document.addEventListener("selectionchange", () => {
+  clearTimeout(selChangeTimer);
+  selChangeTimer = setTimeout(() => {
+    if (floatingMenu) return;
+
+    const el = resolveEditable();
+    if (!el) { removeSelectionBtn(); return; }
+
+    let hasSelection = false;
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      hasSelection = el.selectionStart !== el.selectionEnd;
+    } else {
+      hasSelection = !!window.getSelection()?.toString().trim();
+    }
+
+    if (hasSelection) {
+      if (!selectionBtn) createSelectionBtn();
+      positionSelectionBtn();
+    } else {
+      removeSelectionBtn();
+    }
+  }, 60); // 60ms debounce — responsive but not excessive
+});
+
 // Close menu when clicking outside
 document.addEventListener("mousedown", (e) => {
-  if (floatingMenu && !floatingMenu.contains(e.target)) {
-    removeMenu();
-  }
+  if (floatingMenu && !floatingMenu.contains(e.target)) removeMenu();
 });
 
 function tryOpenMenu() {
