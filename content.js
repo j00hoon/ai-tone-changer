@@ -7,6 +7,7 @@ let floatingMenu = null;
 let selectionBtn = null;
 let savedRange = null;    // range saved when 🪄 is clicked, used to restore partial selection
 let savedInputSel = null; // { start, end } for input/textarea
+let lastMouseUp = { x: 0, y: 0 };
 
 // --- Element detection helpers ---
 
@@ -269,12 +270,15 @@ function positionSelectionBtn() {
     const rect = sel.getRangeAt(0).getBoundingClientRect();
     if (rect.width || rect.height) {
       let top  = rect.top - 34 - GAP;
-      let left = rect.left + rect.width / 2 - 17;
       if (top < 0) top = rect.bottom + GAP;
       btn.style.top  = `${Math.max(6, top)}px`;
-      btn.style.left = `${Math.max(6, Math.min(left, window.innerWidth - 40))}px`;
+      btn.style.left = `${Math.max(6, Math.min(lastMouseUp.x - 17, window.innerWidth - 40))}px`;
       return;
     }
+    // Range rect is empty (e.g. Gmail on Chrome) — use last mouse position
+    btn.style.top  = `${Math.max(6, lastMouseUp.y - 34 - GAP)}px`;
+    btn.style.left = `${Math.max(6, Math.min(lastMouseUp.x - 17, window.innerWidth - 40))}px`;
+    return;
   }
 
   // input / textarea fallback: position above the element itself
@@ -413,7 +417,7 @@ let lastToggleMs = 0;
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { removeMenu(); return; }
 
-  if (e.key.toLowerCase() === "y" && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+  if (e.key?.toLowerCase() === "y" && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
     const now = Date.now();
     if (now - lastToggleMs < 400) return; // debounce: skip if commands API also fires
     lastToggleMs = now;
@@ -447,6 +451,9 @@ document.addEventListener("selectionchange", () => {
     }
   }, 60); // 60ms debounce — responsive but not excessive
 });
+
+// Track mouse position for wand button fallback positioning
+document.addEventListener("mouseup", (e) => { lastMouseUp = { x: e.clientX, y: e.clientY }; });
 
 // Close menu when clicking outside
 document.addEventListener("mousedown", (e) => {
