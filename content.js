@@ -54,8 +54,9 @@ function createFloatingMenu() {
       <button class="atc-close" title="Close">✕</button>
     </div>
     <div class="atc-buttons">
-      <button class="atc-btn" data-tone="professional">💼 Professional</button>
+      <button class="atc-btn" data-tone="business">💼 Business</button>
       <button class="atc-btn" data-tone="casual">💬 Casual</button>
+      <button class="atc-btn" data-tone="diplomatic">🤝 Diplomatic</button>
     </div>
     <div class="atc-status" style="display:none;"></div>
   `;
@@ -72,7 +73,7 @@ function createFloatingMenu() {
       padding: 10px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 13px;
-      width: 210px;
+      width: 290px;
       user-select: none;
     }
     .atc-header {
@@ -160,7 +161,7 @@ function createFloatingMenu() {
 function positionMenu(menu) {
   if (!activeElement) return;
   const rect = activeElement.getBoundingClientRect();
-  const MENU_W = 214;
+  const MENU_W = 294;
   const MENU_H = 110;
   const GAP = 6;
 
@@ -181,7 +182,7 @@ function showMenu(anchorX, anchorY) {
   if (floatingMenu) return;
   floatingMenu = createFloatingMenu();
   if (anchorX !== undefined) {
-    const MENU_W = 214;
+    const MENU_W = 294;
     const left = Math.min(anchorX, window.innerWidth - MENU_W - 6);
     floatingMenu.style.left = `${Math.max(6, left)}px`;
     floatingMenu.style.top  = `${Math.max(6, anchorY)}px`;
@@ -452,7 +453,8 @@ document.addEventListener("selectionchange", () => {
   }, 60); // 60ms debounce — responsive but not excessive
 });
 
-// Track mouse position for wand button fallback positioning
+// Track mouse position for wand button positioning
+document.addEventListener("mousedown", () => { lastMouseUp = { x: 0, y: 0 }; });
 document.addEventListener("mouseup", (e) => { lastMouseUp = { x: e.clientX, y: e.clientY }; });
 
 // Close menu when clicking outside

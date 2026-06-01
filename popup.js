@@ -2,7 +2,7 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 
 // --- State ---
-let selectedTone = "professional";
+let selectedTone = "business";
 
 // --- DOM refs ---
 const tabs = document.querySelectorAll(".tab");
@@ -70,9 +70,17 @@ inputText.addEventListener("keydown", (e) => {
 });
 
 // --- Settings: load saved values ---
-api.storage.local.get(["apiKey", "provider"]).then(({ apiKey = "", provider = "openai" }) => {
-  apiKeyInput.value = apiKey;
+api.storage.local.get(["apiKey_openai", "apiKey_anthropic", "provider"]).then((data) => {
+  const provider = data.provider || "openai";
   providerSelect.value = provider;
+  apiKeyInput.value = data[`apiKey_${provider}`] || "";
+});
+
+// When provider changes, load that provider's saved key
+providerSelect.addEventListener("change", () => {
+  api.storage.local.get([`apiKey_${providerSelect.value}`]).then((data) => {
+    apiKeyInput.value = data[`apiKey_${providerSelect.value}`] || "";
+  });
 });
 
 // --- Settings: show/hide API key ---
@@ -92,7 +100,7 @@ btnSave.addEventListener("click", () => {
     return;
   }
 
-  api.storage.local.set({ apiKey, provider }).then(() => {
+  api.storage.local.set({ [`apiKey_${provider}`]: apiKey, provider }).then(() => {
     flashSaveStatus("Saved!", true);
   });
 });

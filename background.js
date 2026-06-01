@@ -1,23 +1,44 @@
 // Cross-browser API shim
 const api = typeof browser !== "undefined" ? browser : chrome;
 
-const SYSTEM_PROMPTS = {
-  professional:
-    "You are a professional writing assistant. Rewrite the following text in clear, formal, and polished business English. " +
-    "Maintain the original meaning. Return only the rewritten text without any explanation.",
+const PROMPTS_URL =
+  "https://raw.githubusercontent.com/j00hoon/ai-tone-changer/main/prompts.json";
+
+const FALLBACK_PROMPTS = {
+  business:
+    "You are an expert professional copywriter. Your task is to rewrite the user's input into a professional, formal, and clear Business tone.\n\n[Core Objectives]\n- Maintain a polished, professional, and authoritative voice suitable for executive-level or external client communications.\n- Prioritize clarity, conciseness, and structured delivery. Avoid unnecessary filler words.\n\n[Constraints]\n- Keep all original facts, dates, names, and core requests exactly as provided.\n- Do not use slang, idioms, or overly casual contractions (e.g., use \"do not\" instead of \"don't\" where appropriate for high formality).\n- Output ONLY the final rewritten text without any greetings, explanations, or quotes.",
   casual:
-    "You are a friendly writing assistant. Rewrite the following text in natural, warm, and conversational English. " +
-    "Maintain the original meaning. Return only the rewritten text without any explanation.",
+    "You are a friendly and collaborative team member. Your task is to rewrite the user's input into a natural, warm, and approachable Casual tone suitable for workplace peers.\n\n[Core Objectives]\n- Use a conversational yet respectful voice appropriate for internal team chats (Slack/Teams) or close colleagues.\n- Sound encouraging, helpful, and accessible.\n\n[Constraints]\n- Keep it professional enough for the workplace; do not use overly informal internet slang, emojis (unless naturally fitting), or offensive text.\n- Maintain all key information, tasks, and deadlines from the original text.\n- Output ONLY the final rewritten text without any conversational intros or outros from the AI.",
+  diplomatic:
+    "You are a skilled corporate diplomat and mediator. Your task is to rewrite the user's input into a highly tactful, polite, and Diplomatic tone.\n\n[Core Objectives]\n- Soften blunt, aggressive, or direct statements (such as rejections, demands, or complaints) using polite cushioning language.\n- Frame difficult situations or requests in a win-win, solution-oriented manner to preserve professional relationships.\n- Use conditional or indirect phrasing (e.g., \"It would be greatly appreciated if...\", \"We might want to consider...\") to lower tension.\n\n[Constraints]\n- CRITICAL: Do not dilute or lose the core message, request, or boundary of the original text. The recipient must still understand the underlying point/demand clearly.\n- Keep all specific constraints, figures, and deadlines intact.\n- Output ONLY the final rewritten text.",
 };
 
-async function transformText(text, tone, apiKey, provider) {
-  if (provider === "anthropic") {
-    return callAnthropic(text, tone, apiKey);
+// In-memory prompt cache — refreshed once per service worker lifetime
+let cachedPrompts = null;
+
+async function getPrompts() {
+  if (cachedPrompts) return cachedPrompts;
+  try {
+    const res = await fetch(PROMPTS_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    cachedPrompts = await res.json();
+  } catch {
+    cachedPrompts = FALLBACK_PROMPTS;
   }
-  return callOpenAI(text, tone, apiKey);
+  return cachedPrompts;
 }
 
-async function callOpenAI(text, tone, apiKey) {
+async function transformText(text, tone, apiKey, provider) {
+  const prompts = await getPrompts();
+  const systemPrompt = prompts[tone] || prompts.business;
+  const userMessage = `Preserve the exact line breaks and paragraph structure of the original.\n\n${text}`;
+  if (provider === "anthropic") {
+    return callAnthropic(userMessage, systemPrompt, apiKey);
+  }
+  return callOpenAI(userMessage, systemPrompt, apiKey);
+}
+
+async function callOpenAI(text, systemPrompt, apiKey) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -27,7 +48,7 @@ async function callOpenAI(text, tone, apiKey) {
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: SYSTEM_PROMPTS[tone] },
+        { role: "system", content: systemPrompt },
         { role: "user", content: text },
       ],
       max_tokens: 1024,
@@ -44,7 +65,7 @@ async function callOpenAI(text, tone, apiKey) {
   return data.choices[0].message.content.trim();
 }
 
-async function callAnthropic(text, tone, apiKey) {
+async function callAnthropic(text, systemPrompt, apiKey) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -55,7 +76,7 @@ async function callAnthropic(text, tone, apiKey) {
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
-      system: SYSTEM_PROMPTS[tone],
+      system: systemPrompt,
       messages: [{ role: "user", content: text }],
     }),
   });
@@ -90,7 +111,9 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   const { text, tone } = message;
 
-  api.storage.local.get(["apiKey", "provider"]).then(({ apiKey, provider = "openai" }) => {
+  api.storage.local.get(["apiKey_openai", "apiKey_anthropic", "provider"]).then((data) => {
+    const provider = data.provider || "openai";
+    const apiKey = data[`apiKey_${provider}`];
     if (!apiKey) {
       sendResponse({ error: "API key not set. Please configure it in the extension popup." });
       return;
