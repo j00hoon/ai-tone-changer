@@ -3,6 +3,7 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 // --- State ---
 let selectedTone = "business";
+let popupCompareMode = false;
 
 // --- DOM refs ---
 const tabs = document.querySelectorAll(".tab");
@@ -11,6 +12,9 @@ const toneBtns = document.querySelectorAll(".tone-btn");
 const inputText = document.getElementById("input-text");
 const btnTransform = document.getElementById("btn-transform");
 const resultBox = document.getElementById("result-box");
+const compareResults = document.getElementById("compare-results");
+const singleToneUi = document.getElementById("single-tone-ui");
+const modeBtns = document.querySelectorAll(".mode-btn");
 const providerSelect = document.getElementById("provider-select");
 const apiKeyInput = document.getElementById("api-key-input");
 const btnToggleKey = document.getElementById("btn-toggle-key");
@@ -25,6 +29,28 @@ tabs.forEach((tab) => {
     tab.classList.add("active");
     document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
   });
+});
+
+// --- Mode toggle ---
+function applyMode(mode) {
+  popupCompareMode = mode === "compare";
+  modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  singleToneUi.style.display = popupCompareMode ? "none" : "";
+  btnTransform.textContent = popupCompareMode ? "✨ Compare All Tones" : "Transform";
+  resultBox.style.display = "none";
+  compareResults.innerHTML = "";
+}
+
+modeBtns.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    applyMode(btn.dataset.mode);
+    api.storage.local.set({ compareMode: popupCompareMode });
+  });
+});
+
+// Load saved mode
+api.storage.local.get("compareMode").then((data) => {
+  if (data.compareMode) applyMode("compare");
 });
 
 // --- Tone selection ---
@@ -45,22 +71,29 @@ btnTransform.addEventListener("click", async () => {
   }
 
   btnTransform.disabled = true;
-  btnTransform.textContent = "Transforming…";
+  const originalLabel = btnTransform.textContent;
+  btnTransform.textContent = popupCompareMode ? "Comparing…" : "Transforming…";
   hideResult();
+  compareResults.innerHTML = "";
 
-  const response = await api.runtime.sendMessage({
-    type: "TRANSFORM_TEXT",
-    text,
-    tone: selectedTone,
-  });
-
-  btnTransform.disabled = false;
-  btnTransform.textContent = "Transform";
-
-  if (response.error) {
-    showResult(response.error, true);
+  if (popupCompareMode) {
+    const response = await api.runtime.sendMessage({ type: "COMPARE_TONES", text });
+    btnTransform.disabled = false;
+    btnTransform.textContent = originalLabel;
+    if (response.error) {
+      showResult(response.error, true);
+    } else {
+      showCompareResults(response.result);
+    }
   } else {
-    showResult(response.result, false);
+    const response = await api.runtime.sendMessage({ type: "TRANSFORM_TEXT", text, tone: selectedTone });
+    btnTransform.disabled = false;
+    btnTransform.textContent = originalLabel;
+    if (response.error) {
+      showResult(response.error, true);
+    } else {
+      showResult(response.result, false);
+    }
   }
 });
 
@@ -104,6 +137,48 @@ btnSave.addEventListener("click", () => {
     flashSaveStatus("Saved!", true);
   });
 });
+
+// --- Compare results ---
+function showCompareResults(results) {
+  const tones = [
+    { key: "business",   icon: "💼", label: "Business"   },
+    { key: "casual",     icon: "💬", label: "Casual"     },
+    { key: "diplomatic", icon: "🤝", label: "Diplomatic" },
+  ];
+
+  compareResults.innerHTML = "";
+  tones.forEach(({ key, icon, label }) => {
+    const text = results[key] || "";
+    const card = document.createElement("div");
+    card.className = "compare-card";
+
+    const header = document.createElement("div");
+    header.className = "compare-card-header";
+
+    const titleEl = document.createElement("span");
+    titleEl.textContent = `${icon} ${label}`;
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "btn-copy";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(text);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+    });
+
+    header.appendChild(titleEl);
+    header.appendChild(copyBtn);
+
+    const textEl = document.createElement("div");
+    textEl.className = "compare-card-text";
+    textEl.textContent = text;
+
+    card.appendChild(header);
+    card.appendChild(textEl);
+    compareResults.appendChild(card);
+  });
+}
 
 // --- Helpers ---
 function showResult(text, isError) {

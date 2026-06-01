@@ -8,6 +8,16 @@ let selectionBtn = null;
 let savedRange = null;    // range saved when 🪄 is clicked, used to restore partial selection
 let savedInputSel = null; // { start, end } for input/textarea
 let lastMouseUp = { x: 0, y: 0 };
+let compareMode = false;
+let compareModeLoaded = false;
+
+async function ensureCompareModeLoaded() {
+  if (compareModeLoaded) return;
+  if (!api?.storage?.local) return;
+  const data = await api.storage.local.get("compareMode");
+  compareMode = !!data.compareMode;
+  compareModeLoaded = true;
+}
 
 // --- Element detection helpers ---
 
@@ -53,12 +63,22 @@ function createFloatingMenu() {
       <span class="atc-title">AI Tone Changer</span>
       <button class="atc-close" title="Close">✕</button>
     </div>
-    <div class="atc-buttons">
-      <button class="atc-btn" data-tone="business">💼 Business</button>
-      <button class="atc-btn" data-tone="casual">💬 Casual</button>
-      <button class="atc-btn" data-tone="diplomatic">🤝 Diplomatic</button>
+    <div class="atc-mode-toggle">
+      <button class="atc-mode-btn ${!compareMode ? "active" : ""}" data-mode="single">Single</button>
+      <button class="atc-mode-btn ${compareMode ? "active" : ""}" data-mode="compare">Compare All</button>
+    </div>
+    <div class="atc-single-ui"${compareMode ? ' style="display:none"' : ""}>
+      <div class="atc-buttons">
+        <button class="atc-btn" data-tone="business">💼 Business</button>
+        <button class="atc-btn" data-tone="casual">💬 Casual</button>
+        <button class="atc-btn" data-tone="diplomatic">🤝 Diplomatic</button>
+      </div>
+    </div>
+    <div class="atc-compare-ui"${!compareMode ? ' style="display:none"' : ""}>
+      <button class="atc-compare-btn">✨ Compare All Tones</button>
     </div>
     <div class="atc-status" style="display:none;"></div>
+    <div class="atc-results" style="display:none;"></div>
   `;
 
   const style = document.createElement("style");
@@ -73,7 +93,7 @@ function createFloatingMenu() {
       padding: 10px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 13px;
-      width: 290px;
+      width: 310px;
       user-select: none;
     }
     .atc-header {
@@ -107,6 +127,57 @@ function createFloatingMenu() {
     }
     .atc-btn:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
     .atc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .atc-mode-toggle {
+      display: flex;
+      gap: 3px;
+      background: #f1f5f9;
+      border-radius: 7px;
+      padding: 3px;
+      margin-bottom: 8px;
+    }
+    .atc-mode-btn {
+      flex: 1;
+      padding: 4px 6px;
+      border: none;
+      border-radius: 5px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 11px;
+      color: #718096;
+      transition: all 0.15s;
+    }
+    .atc-mode-btn.active { background: #fff; color: #2d3748; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .atc-compare-btn {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 7px;
+      background: #f7fafc;
+      cursor: pointer;
+      font-size: 12px;
+      color: #2d3748;
+      transition: all 0.15s;
+    }
+    .atc-compare-btn:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .atc-compare-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .atc-results { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .atc-result-item {
+      padding: 7px 9px;
+      border: 1px solid #e2e8f0;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .atc-result-item:hover { border-color: #4f46e5; background: #f5f3ff; }
+    .atc-result-label { font-size: 11px; font-weight: 600; color: #4f46e5; margin-bottom: 3px; }
+    .atc-result-preview {
+      font-size: 11px;
+      color: #4a5568;
+      line-height: 1.4;
+      max-height: 80px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
     .atc-status {
       margin-top: 8px;
       padding: 5px 8px;
@@ -123,9 +194,25 @@ function createFloatingMenu() {
   document.body.appendChild(menu);
 
   menu.querySelector(".atc-close").addEventListener("click", removeMenu);
+
+  menu.querySelectorAll(".atc-mode-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.mode;
+      compareMode = mode === "compare";
+      api?.storage?.local?.set({ compareMode });
+      menu.querySelectorAll(".atc-mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+      menu.querySelector(".atc-single-ui").style.display = compareMode ? "none" : "";
+      menu.querySelector(".atc-compare-ui").style.display = compareMode ? "" : "none";
+      menu.querySelector(".atc-results").style.display = "none";
+      menu.querySelector(".atc-status").style.display = "none";
+    });
+  });
+
   menu.querySelectorAll(".atc-btn").forEach((btn) => {
     btn.addEventListener("click", () => handleToneClick(btn.dataset.tone));
   });
+
+  menu.querySelector(".atc-compare-btn").addEventListener("click", handleCompareClick);
 
   // Drag by header
   const header = menu.querySelector(".atc-header");
@@ -161,7 +248,7 @@ function createFloatingMenu() {
 function positionMenu(menu) {
   if (!activeElement) return;
   const rect = activeElement.getBoundingClientRect();
-  const MENU_W = 294;
+  const MENU_W = 314;
   const MENU_H = 110;
   const GAP = 6;
 
@@ -182,7 +269,7 @@ function showMenu(anchorX, anchorY) {
   if (floatingMenu) return;
   floatingMenu = createFloatingMenu();
   if (anchorX !== undefined) {
-    const MENU_W = 294;
+    const MENU_W = 314;
     const left = Math.min(anchorX, window.innerWidth - MENU_W - 6);
     floatingMenu.style.left = `${Math.max(6, left)}px`;
     floatingMenu.style.top  = `${Math.max(6, anchorY)}px`;
@@ -309,13 +396,32 @@ function getTextFromElement(el) {
 }
 
 function replaceTextInElement(el, original, replacement, isPartial = false) {
+  // If element was detached by SPA re-render, try to find a fresh one
+  if (!el?.isConnected) {
+    const fresh = resolveEditable();
+    if (!fresh) return;
+    el = fresh;
+    activeElement = fresh;
+    // Partial selection no longer valid on a fresh element
+    isPartial = false;
+  }
+
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
     const start = isPartial && savedInputSel ? savedInputSel.start : 0;
     const end   = isPartial && savedInputSel ? savedInputSel.end   : el.value.length;
-    el.value = el.value.substring(0, start) + replacement + el.value.substring(end);
+    const newValue = el.value.substring(0, start) + replacement + el.value.substring(end);
+
+    // Use native setter so React/Vue controlled inputs pick up the change
+    const proto = el.tagName === "TEXTAREA"
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    if (nativeSetter) nativeSetter.call(el, newValue);
+    else el.value = newValue;
+
     el.selectionStart = start;
     el.selectionEnd   = start + replacement.length;
-    el.dispatchEvent(new Event("input",  { bubbles: true }));
+    el.dispatchEvent(new InputEvent("input",  { bubbles: true, cancelable: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     return;
   }
@@ -323,21 +429,37 @@ function replaceTextInElement(el, original, replacement, isPartial = false) {
   if (el.isContentEditable) {
     el.focus();
 
-    if (isPartial && savedRange) {
-      // Restore saved selection → replace only that portion
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(savedRange);
-      document.execCommand("insertText", false, replacement);
-    } else {
-      // No selection → replace entire content
-      document.execCommand("selectAll", false, null);
-      const safe = replacement
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\n/g, "</p><p>");
-      document.execCommand("insertHTML", false, `<p>${safe}</p>`);
+    // Validate saved range — DOM may have mutated during async LLM call
+    const rangeValid = isPartial && savedRange &&
+      savedRange.startContainer?.isConnected &&
+      savedRange.endContainer?.isConnected;
+
+    let success = false;
+
+    if (rangeValid) {
+      try {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+        success = document.execCommand("insertText", false, replacement);
+      } catch (_) { success = false; }
+    }
+
+    if (!success) {
+      // Full replacement fallback
+      try {
+        document.execCommand("selectAll", false, null);
+        const safe = replacement
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\n/g, "</p><p>");
+        document.execCommand("insertHTML", false, `<p>${safe}</p>`);
+      } catch (_) {
+        // Last resort: direct assignment
+        el.innerText = replacement;
+        el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      }
     }
 
     requestAnimationFrame(() => {
@@ -350,6 +472,7 @@ function replaceTextInElement(el, original, replacement, isPartial = false) {
 // --- Core transform logic ---
 
 async function handleToneClick(tone) {
+  if (!activeElement?.isConnected) activeElement = resolveEditable();
   if (!activeElement) return;
 
   // Use saved selection text (from 🪄 click) if available, otherwise full text
@@ -373,6 +496,7 @@ async function handleToneClick(tone) {
       showStatus("error", response.error);
     } else {
       replaceTextInElement(activeElement, text, response.result, isPartial);
+      if (floatingMenu) floatingMenu.querySelector(".atc-results").style.display = "none";
       showStatus("success", "Done!");
       setTimeout(removeMenu, 1200);
     }
@@ -402,6 +526,90 @@ function showStatus(type, msg) {
   el.style.display = "block";
 }
 
+function hideStatus() {
+  if (!floatingMenu) return;
+  floatingMenu.querySelector(".atc-status").style.display = "none";
+}
+
+async function handleCompareClick() {
+  if (!activeElement?.isConnected) activeElement = resolveEditable();
+  if (!activeElement) return;
+
+  const isPartial = !!(savedRange || savedInputSel);
+  const text = isPartial
+    ? getSavedSelectionText(activeElement)
+    : getTextFromElement(activeElement).trim();
+
+  if (!text) {
+    showStatus("error", "No text found in the input field.");
+    savedRange = null; savedInputSel = null;
+    return;
+  }
+
+  const compareBtn = floatingMenu?.querySelector(".atc-compare-btn");
+  if (compareBtn) compareBtn.disabled = true;
+  floatingMenu.querySelector(".atc-results").style.display = "none";
+  showStatus("loading", "Comparing all tones…");
+
+  try {
+    const response = await api.runtime.sendMessage({ type: "COMPARE_TONES", text });
+    hideStatus();
+    if (!response) {
+      showStatus("error", "No response from background. Try reloading the page.");
+      savedRange = null; savedInputSel = null;
+    } else if (response.error) {
+      showStatus("error", response.error);
+      savedRange = null; savedInputSel = null;
+    } else if (compareMode && floatingMenu) {
+      showCompareResults(response.result, isPartial);
+    }
+  } catch (err) {
+    showStatus("error", err?.message || "Extension error. Please try again.");
+    savedRange = null; savedInputSel = null;
+  } finally {
+    if (compareBtn) compareBtn.disabled = false;
+  }
+}
+
+function showCompareResults(results, isPartial) {
+  const container = floatingMenu?.querySelector(".atc-results");
+  if (!container) return;
+
+  const tones = [
+    { key: "business",   icon: "💼", label: "Business"   },
+    { key: "casual",     icon: "💬", label: "Casual"     },
+    { key: "diplomatic", icon: "🤝", label: "Diplomatic" },
+  ];
+
+  container.innerHTML = "";
+  tones.forEach(({ key, icon, label }) => {
+    const fullText = results[key] || "";
+
+    const item = document.createElement("div");
+    item.className = "atc-result-item";
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "atc-result-label";
+    labelEl.textContent = `${icon} ${label}`;
+
+    const previewEl = document.createElement("div");
+    previewEl.className = "atc-result-preview";
+    previewEl.textContent = fullText;
+
+    item.appendChild(labelEl);
+    item.appendChild(previewEl);
+    item.addEventListener("click", () => {
+      replaceTextInElement(activeElement, "", fullText, isPartial);
+      savedRange = null; savedInputSel = null;
+      removeMenu();
+    });
+
+    container.appendChild(item);
+  });
+
+  container.style.display = "flex";
+}
+
 function setButtonsDisabled(disabled) {
   if (!floatingMenu) return;
   floatingMenu.querySelectorAll(".atc-btn").forEach((b) => (b.disabled = disabled));
@@ -410,7 +618,10 @@ function setButtonsDisabled(disabled) {
 // --- Event listeners ---
 
 document.addEventListener("focusin", (e) => {
-  if (isEditable(e.target)) activeElement = e.target;
+  if (isEditable(e.target)) {
+    activeElement = e.target;
+    ensureCompareModeLoaded().catch(() => {});
+  }
 });
 
 // Capture phase fires before page scripts (React, Gmail, etc.) can intercept

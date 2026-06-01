@@ -11,26 +11,31 @@ const FALLBACK_PROMPTS = {
     "You are a friendly and collaborative team member. Your task is to rewrite the user's input into a natural, warm, and approachable Casual tone suitable for workplace peers.\n\n[Core Objectives]\n- Use a conversational yet respectful voice appropriate for internal team chats (Slack/Teams) or close colleagues.\n- Sound encouraging, helpful, and accessible.\n\n[Constraints]\n- Keep it professional enough for the workplace; do not use overly informal internet slang, emojis (unless naturally fitting), or offensive text.\n- Maintain all key information, tasks, and deadlines from the original text.\n- Output ONLY the final rewritten text without any conversational intros or outros from the AI.",
   diplomatic:
     "You are a skilled corporate diplomat and mediator. Your task is to rewrite the user's input into a highly tactful, polite, and Diplomatic tone.\n\n[Core Objectives]\n- Soften blunt, aggressive, or direct statements (such as rejections, demands, or complaints) using polite cushioning language.\n- Frame difficult situations or requests in a win-win, solution-oriented manner to preserve professional relationships.\n- Use conditional or indirect phrasing (e.g., \"It would be greatly appreciated if...\", \"We might want to consider...\") to lower tension.\n\n[Constraints]\n- CRITICAL: Do not dilute or lose the core message, request, or boundary of the original text. The recipient must still understand the underlying point/demand clearly.\n- Keep all specific constraints, figures, and deadlines intact.\n- Output ONLY the final rewritten text.",
+  compare:
+    "Rewrite the input text in exactly 3 tones. Return ONLY a valid JSON object with no extra text:\n{\"business\":\"...\",\"casual\":\"...\",\"diplomatic\":\"...\"}\n\nbusiness: formal, authoritative, executive-level\ncasual: warm, conversational, workplace-friendly\ndiplomatic: tactful, solution-oriented, softens blunt statements\n\nPreserve original line breaks. Output ONLY the JSON object.",
 };
 
-// In-memory prompt cache — refreshed once per service worker lifetime
-let cachedPrompts = null;
+const PROMPTS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 async function getPrompts() {
-  if (cachedPrompts) return cachedPrompts;
+  const stored = await api.storage.local.get(["prompts", "promptsFetchedAt"]);
+  const age = Date.now() - (stored.promptsFetchedAt || 0);
+  if (stored.prompts && age < PROMPTS_CACHE_TTL) return stored.prompts;
+
   try {
-    const res = await fetch(PROMPTS_URL, { cache: "no-store" });
+    const res = await fetch(PROMPTS_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    cachedPrompts = await res.json();
+    const prompts = await res.json();
+    await api.storage.local.set({ prompts, promptsFetchedAt: Date.now() });
+    return prompts;
   } catch {
-    cachedPrompts = FALLBACK_PROMPTS;
+    return stored.prompts || FALLBACK_PROMPTS;
   }
-  return cachedPrompts;
 }
 
 async function transformText(text, tone, apiKey, provider) {
   const prompts = await getPrompts();
-  const systemPrompt = prompts[tone] || prompts.business;
+  const systemPrompt = prompts[tone] || FALLBACK_PROMPTS[tone] || FALLBACK_PROMPTS.business;
   const userMessage = `Preserve the exact line breaks and paragraph structure of the original.\n\n${text}`;
   if (provider === "anthropic") {
     return callAnthropic(userMessage, systemPrompt, apiKey);
@@ -106,10 +111,41 @@ api.commands.onCommand.addListener(async (command) => {
   api.tabs.sendMessage(tab.id, { type: "OPEN_TONE_MENU" }).catch(() => {});
 });
 
-api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type !== "TRANSFORM_TEXT") return false;
+function parseJson(text) {
+  let clean = text.replace(/^```(?:json)?\s*/im, "").replace(/\s*```$/m, "").trim();
 
-  const { text, tone } = message;
+  // Extract outermost JSON object (ignore any surrounding text)
+  const objMatch = clean.match(/\{[\s\S]*\}/);
+  if (objMatch) clean = objMatch[0];
+
+  // Fix trailing commas before } or ]
+  clean = clean.replace(/,\s*([}\]])/g, "$1");
+
+  try {
+    return JSON.parse(clean);
+  } catch {
+    // Fix unescaped newlines inside string values and retry
+    const fixed = clean.replace(/"(?:[^"\\]|\\.)*"/gs, (m) =>
+      m.replace(/\n/g, "\\n").replace(/\r/g, "\\r")
+    );
+    return JSON.parse(fixed);
+  }
+}
+
+async function compareTones(text, apiKey, provider) {
+  const prompts = await getPrompts();
+  const systemPrompt = prompts.compare || FALLBACK_PROMPTS.compare;
+  const userMessage = `Preserve the exact line breaks and paragraph structure of the original.\n\n${text}`;
+  const raw = provider === "anthropic"
+    ? await callAnthropic(userMessage, systemPrompt, apiKey)
+    : await callOpenAI(userMessage, systemPrompt, apiKey);
+  return parseJson(raw);
+}
+
+api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type !== "TRANSFORM_TEXT" && message.type !== "COMPARE_TONES") return false;
+
+  const { text } = message;
 
   api.storage.local.get(["apiKey_openai", "apiKey_anthropic", "provider"]).then((data) => {
     const provider = data.provider || "openai";
@@ -118,11 +154,13 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ error: "API key not set. Please configure it in the extension popup." });
       return;
     }
-    transformText(text, tone, apiKey, provider)
+    const promise = message.type === "COMPARE_TONES"
+      ? compareTones(text, apiKey, provider)
+      : transformText(text, message.tone, apiKey, provider);
+    promise
       .then((result) => sendResponse({ result }))
       .catch((err) => sendResponse({ error: err.message }));
   });
 
-  // Return true to keep the message channel open for the async response
   return true;
 });

@@ -22,10 +22,17 @@
 
   <!-- Transform Tab -->
   <div class="tab-panel active" id="tab-transform">
-    <div class="tone-row">
-      <button class="tone-btn selected" data-tone="business">💼 Business</button>
-      <button class="tone-btn" data-tone="casual">💬 Casual</button>
-      <button class="tone-btn" data-tone="diplomatic">🤝 Diplomatic</button>
+    <div class="mode-toggle">
+      <button class="mode-btn active" data-mode="single">Single Tone</button>
+      <button class="mode-btn" data-mode="compare">Compare All</button>
+    </div>
+
+    <div id="single-tone-ui">
+      <div class="tone-row">
+        <button class="tone-btn selected" data-tone="business">💼 Business</button>
+        <button class="tone-btn" data-tone="casual">💬 Casual</button>
+        <button class="tone-btn" data-tone="diplomatic">🤝 Diplomatic</button>
+      </div>
     </div>
 
     <textarea id="input-text" placeholder="Paste or type your text here…"></textarea>
@@ -36,6 +43,7 @@
     </div>
 
     <div class="result-box" id="result-box"></div>
+    <div id="compare-results"></div>
   </div>
 
   <!-- Settings Tab -->
