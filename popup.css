@@ -180,6 +180,18 @@ label {
   letter-spacing: 0.04em;
 }
 
+label a {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #4f46e5;
+  text-decoration: none;
+}
+
+label a:hover {
+  text-decoration: underline;
+}
+
 .input-row {
   display: flex;
   gap: 6px;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Tone Changer",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Convert your text to professional or casual English using AI",
   "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "commands": {

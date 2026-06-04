@@ -20,6 +20,16 @@ const apiKeyInput = document.getElementById("api-key-input");
 const btnToggleKey = document.getElementById("btn-toggle-key");
 const btnSave = document.getElementById("btn-save");
 const saveStatus = document.getElementById("save-status");
+const apiKeyLink = document.getElementById("api-key-link");
+
+const API_KEY_URLS = {
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+};
+
+function updateApiKeyLink(provider) {
+  apiKeyLink.href = API_KEY_URLS[provider] || "#";
+}
 
 // --- Tab switching ---
 tabs.forEach((tab) => {
@@ -107,13 +117,16 @@ api.storage.local.get(["apiKey_openai", "apiKey_anthropic", "provider"]).then((d
   const provider = data.provider || "openai";
   providerSelect.value = provider;
   apiKeyInput.value = data[`apiKey_${provider}`] || "";
+  updateApiKeyLink(provider);
 });
 
 // When provider changes, load that provider's saved key
 providerSelect.addEventListener("change", () => {
-  api.storage.local.get([`apiKey_${providerSelect.value}`]).then((data) => {
-    apiKeyInput.value = data[`apiKey_${providerSelect.value}`] || "";
+  const provider = providerSelect.value;
+  api.storage.local.get([`apiKey_${provider}`]).then((data) => {
+    apiKeyInput.value = data[`apiKey_${provider}`] || "";
   });
+  updateApiKeyLink(provider);
 });
 
 // --- Settings: show/hide API key ---
